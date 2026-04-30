@@ -37,90 +37,108 @@ from .db import (
 _LAZYLLM_CONTEXT_CREATE_USER_ATTR = 'user' + '_id'
 
 
-_EXTRACTION_PROMPT = """你是“词表进化抽取器”。
+_EXTRACTION_PROMPT = """You are a vocabulary evolution extractor.
 
-任务：从给定的一段用户历史对话中，只提取“非常明确、可以直接进入用户词表”的同义词二元组。
+Task: from the given user chat-history segment, extract only synonym pairs that are
+very explicit and can be directly added to the user's vocabulary.
 
-只在以下证据足够明确时抽取：
-1. 用户明确说“记住 A 就是 B”“A 指的是 B”“A 和 B 是一回事”。
-2. 用户在多轮中反复稳定地把 A 和 B 互指，并且上下文含义一致。
+Extract only when the evidence is clear enough:
+1. The user explicitly says "remember A means B", "A refers to B", or
+   "A and B are the same thing".
+2. Across multiple turns, the user repeatedly and consistently uses A and B
+   interchangeably with the same contextual meaning.
 
-必须遵守：
-1. 宁缺毋滥。没有明确证据时返回空列表 []。
-2. 每条记录只能包含一个 word 和一个 synonym，不允许数组、并列短语或多词混写。
-3. message_ids 必须来自输入中提供的消息 ID，且至少包含 1 个。
-4. description 简短说明该同义关系适用的语义场景。
-5. reason 说明为什么这条记录成立。
-6. 最多返回 {max_pairs} 条。
+Rules:
+1. Prefer precision over recall. Return an empty list [] when evidence is unclear.
+2. Each record must contain exactly one word and one synonym. Do not use arrays,
+   parallel phrases, or mixed multi-term entries.
+3. message_ids must come from the input message IDs and must contain at least one item.
+4. description should briefly describe the semantic scenario where the synonym relation applies.
+5. reason should explain why the record is valid.
+6. Return at most {max_pairs} records.
 
-下面是可用的用户历史片段。每一行都已经把 message_id 和对应用户原话绑定在一起，返回的 message_ids 只能从这些片段里选择：
+Below are the available user-history segments. Each line binds a message_id to the
+corresponding original user text. Returned message_ids must be selected only from
+these segments:
 {history_segments}
 
-输出必须是 JSON 数组，元素结构严格如下：
+Output must be a JSON array with exactly this item structure:
 [
     {
-    "word": "苹果",
-    "synonym": "apple",
-    "description": "水果语境",
-    "reason": "用户明确要求记住苹果就是 apple",
+    "word": "repo",
+    "synonym": "repository",
+    "description": "software engineering context",
+    "reason": "The user explicitly asked the assistant to remember that repo means repository.",
     "message_ids": ["msg_1"]
     }
 ]
-除 JSON 外不要输出任何解释。"""
+Do not output any explanation outside JSON."""
 
 
-_CONFLICT_PROMPT = """你是“词族冲突判定器”。
+_CONFLICT_PROMPT = """You are a vocabulary-group conflict resolver.
 
-任务：新词与锚点词被抽取为同义词，但锚点词已经属于多个词族。请判断新词能否无歧义加入哪些现有词族。
+Task: a candidate word and an anchor word were extracted as synonyms, but the
+anchor word already belongs to multiple vocabulary groups. Decide which existing
+groups the candidate word can join unambiguously.
 
-输入会给出：
-1. candidate_word: 待加入词表的新词。
-2. anchor_word: 已存在于多个词族中的词。
-3. description: 该同义关系的语义说明。
-4. evidence: 对话证据（包含 message_id 和文本片段）。
-5. existing_groups: 现有候选词族，每个词族包含 group_id、description、words。
+The input provides:
+1. candidate_word: the new word to add to the vocabulary.
+2. anchor_word: an existing word that belongs to multiple vocabulary groups.
+3. description: the semantic description of this synonym relation.
+4. evidence: dialogue evidence, including message_id and text snippets.
+5. existing_groups: candidate vocabulary groups. Each group contains group_id,
+   description, and words.
 
-判定原则：
-1. 只有在上下文足够清楚时，才把 candidate_word 放入对应 group_ids_can_join。
-2. 如果上下文足够清楚，能够明确排除某些词族不可能归属，就把它们放入 excluded_group_ids。
-3. 无法明确判断、仍然可能属于、需要用户处理的词族，才放入 conflict_group_ids。
-4. 如果全部都不清楚，就把所有候选词族放入 conflict_group_ids。
-5. 不允许编造新的 group_id。
+Decision rules:
+1. Add candidate_word to group_ids_can_join only when the context is clear enough.
+2. If the context clearly rules out some groups, put those groups into excluded_group_ids.
+3. Put a group into conflict_group_ids only when its membership remains possible,
+   the model cannot decide, and user handling is needed.
+4. If nothing is clear, put all candidate groups into conflict_group_ids.
+5. Do not fabricate new group_id values.
 
-重要语义约束：
-1. conflict_group_ids 的含义是“仍然存在多个可能归属，但模型无法判断”，不是“语义上发生冲突”也不是“已经明确不属于”。
-2. 如果证据明确说明某些词族不成立，比如“这是工程语境，不是财务术语，也不是化学试剂”，那么对应 group_id 必须放入 excluded_group_ids，而不是 conflict_group_ids。
-3. 每个候选 group_id 只能出现在三类之一：group_ids_can_join、excluded_group_ids、conflict_group_ids。
-4. 如果某个 group_id 已被明确排除，就不要再要求用户确认。
+Important semantic constraints:
+1. conflict_group_ids means "multiple possible memberships remain, but the model
+   cannot decide". It does not mean a semantic contradiction, and it does not mean
+   that the group has already been ruled out.
+2. If the evidence clearly says some groups are invalid, for example "this is an
+   engineering context, not a finance term or a chemical reagent", then the
+   corresponding group_id values must go into excluded_group_ids rather than
+   conflict_group_ids.
+3. Each candidate group_id may appear in only one of these fields:
+   group_ids_can_join, excluded_group_ids, or conflict_group_ids.
+4. If a group_id has been clearly excluded, do not ask the user to confirm it again.
 
-待判定新词：{candidate_word}
-锚点词：{anchor_word}
-语义说明：{description}
+Candidate word: {candidate_word}
+Anchor word: {anchor_word}
+Semantic description: {description}
 
-对话证据：
+Dialogue evidence:
 {evidence}
 
-现有候选词族：
+Existing candidate vocabulary groups:
 {existing_groups}
 
-示例：
-如果证据明确说明“这是铁路工程语境，不是财务术语，也不是化学试剂”，而候选词族为 g1=铁路工程、g2=财务、g3=化学，则应输出：
+Example:
+If the evidence clearly says "this is a railway engineering context, not a finance
+term or a chemical reagent", and the candidate groups are g1=railway engineering,
+g2=finance, and g3=chemistry, output:
 {
-    "reason": "K 明确属于铁路工程语境，且已排除财务和化学语境。",
+    "reason": "K clearly belongs to the railway engineering context, and finance and chemistry were ruled out.",
     "group_ids_can_join": ["g1"],
     "excluded_group_ids": ["g2", "g3"],
     "conflict_group_ids": []
 }
 
-输出 JSON：
+Output JSON:
 {
-  "reason": "简洁说明",
-    "group_ids_can_join": ["g1"],
-    "excluded_group_ids": [],
+  "reason": "brief explanation",
+  "group_ids_can_join": ["g1"],
+  "excluded_group_ids": [],
   "conflict_group_ids": ["g2", "g3"]
 }
 
-除 JSON 外不要输出任何解释。"""
+Do not output any explanation outside JSON."""
 
 
 _SENTENCE_BOUNDARY_RE = re.compile(r'.*?(?:[。！？!?；;]+|[\n]+|$)', re.S)
@@ -203,17 +221,17 @@ def _split_text_for_limit(value: Any, limit: int) -> List[str]:
 
 def _format_evidence_lines(evidence: Sequence[Dict[str, str]]) -> str:
     lines = [f'- [message_id={item["message_id"]}] {item["text"]}' for item in evidence if item.get('message_id')]
-    return '\n'.join(lines) if lines else '无'
+    return '\n'.join(lines) if lines else 'None'
 
 
 def _format_group_summaries(groups: Sequence[Dict[str, Any]]) -> str:
     lines = []
     for group in groups:
         group_id = _norm_text(group.get('group_id'))
-        description = _norm_text(group.get('description')) or '无'
-        words = ', '.join(_dedupe_keep_order(group.get('words') or [])) or '无'
+        description = _norm_text(group.get('description')) or 'None'
+        words = ', '.join(_dedupe_keep_order(group.get('words') or [])) or 'None'
         lines.append(f'[group_id={group_id}] description={description}; words={words}')
-    return '\n'.join(lines) if lines else '无'
+    return '\n'.join(lines) if lines else 'None'
 
 
 def _json_dump_list(values: Sequence[str]) -> str:
@@ -582,7 +600,7 @@ class ActionPlanningModule(ModuleBase):
         prompt_payload = {
             'candidate_word': candidate_word,
             'anchor_word': anchor_word,
-            'description': candidate.description or '无',
+            'description': candidate.description or 'None',
             'evidence': _format_evidence_lines(evidence),
             'existing_groups': _format_group_summaries(existing_groups),
         }
@@ -624,7 +642,7 @@ class ActionPlanningModule(ModuleBase):
             'reason': (
                 _norm_text(response.get('reason'))
                 or candidate.reason
-                or f'`{candidate_word}` 与 `{anchor_word}` 的归属需要进一步确认。'
+                or f'The membership of `{candidate_word}` and `{anchor_word}` needs further confirmation.'
             ),
             'allowed_group_ids': allowed,
             'excluded_group_ids': excluded,
@@ -695,7 +713,11 @@ class ActionPlanningModule(ModuleBase):
                 continue
             if not word_groups and not synonym_groups:
                 actions.append(self._build_action(
-                    reason=candidate.reason or f'从历史对话中抽取到 `{candidate.word}` 与 `{candidate.synonym}` 的明确同义关系。',
+                    reason=(
+                        candidate.reason
+                        or f'Extracted an explicit synonym relation between `{candidate.word}` '
+                        f'and `{candidate.synonym}` from chat history.'
+                    ),
                     words=[candidate.word, candidate.synonym],
                     description=candidate.description,
                     group_ids=[],
@@ -720,7 +742,11 @@ class ActionPlanningModule(ModuleBase):
 
             if len(anchor_groups) == 1:
                 actions.append(self._build_action(
-                    reason=candidate.reason or f'`{new_word}` 可直接加入 `{anchor_word}` 所在词族。',
+                    reason=(
+                        candidate.reason
+                        or f'`{new_word}` can be directly added to the vocabulary group '
+                        f'that contains `{anchor_word}`.'
+                    ),
                     words=[new_word],
                     description='',
                     group_ids=list(anchor_groups),
