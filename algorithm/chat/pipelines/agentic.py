@@ -330,6 +330,7 @@ async def _agentic_forward_stream(
             return
         with output_lock:
             _flush_stream_frames_to_queue()
+            event['preview_text'] = query
             frame = _format_tool_stream_frame(event)
             if frame is not None:
                 event_queue.put({'type': 'frame', 'frame': frame})
