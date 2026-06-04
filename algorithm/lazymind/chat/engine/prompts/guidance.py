@@ -97,9 +97,11 @@ SEARCH_GUIDANCE = (
     "no relevant result.\n\n"
     "For papers, research topics, arXiv ids, abstracts, or author-related questions, "
     "still try `kb_search` first; after knowledge-base evidence is unavailable or "
-    "insufficient, prefer `ArxivSearch_search` over general web search tools.\n\n"
+    "insufficient, prefer `SciverseSearch` over general web search tools. "
+    "Use `ArxivSearch` as a fallback or open arXiv-specific supplement.\n\n"
     "When answering with knowledge-base evidence, cite with the original `[[document.chunk]]` "
-    "markers. When answering with web search tools, `url_fetch`, or `ArxivSearch_search`, do not "
+    "markers. When answering with web search tools, `url_fetch`, `SciverseSearch`, "
+    "or `ArxivSearch`, do not "
     "fabricate `[[document.chunk]]`; instead, mention the source title or URL plainly.\n"
 )
 TOOL_CALL_STATUS_GUIDANCE = (
