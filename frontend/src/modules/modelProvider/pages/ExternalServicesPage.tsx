@@ -375,6 +375,8 @@ export default function ExternalServicesPage() {
   const [addingKey, setAddingKey] = useState(false);
   const [visibleKeys, setVisibleKeys] = useState<Set<number>>(new Set());
   const [groupForActiveService, setGroupForActiveService] = useState<ApiExternalGroup | null>(null);
+  const originalBaseUrlRef = useRef("");
+  const loadGroupKeysGenRef = useRef(0);
 
   const loadExternalServices = useCallback((keyword: string) => {
     const requestId = requestIdRef.current + 1;
@@ -454,24 +456,114 @@ export default function ExternalServicesPage() {
   }
 
   async function loadGroupKeys(serviceKey: string) {
+    const gen = loadGroupKeysGenRef.current;
     try {
       const groupData = await modelProviderRequest<{ groups?: ApiExternalGroup[] }>(
         "GET",
         `/model_providers/${encodeURIComponent(serviceKey)}/groups`
       );
+      if (loadGroupKeysGenRef.current !== gen) return;
       const group = (groupData.groups || [])[0] || null;
       setGroupForActiveService(group);
       if (group) {
         const rawKey = (group as any).api_key || "";
         const keys = rawKey.split("\n").map((k: string) => k.trim()).filter(Boolean);
         setKeyList(keys);
+        // When the group has a custom base_url, use it as the initial form value.
+        // This ensures the user's previously-saved base_url is shown after page refresh,
+        // not the catalog default from user_model_providers.base_url.
+        if (group.base_url) {
+          form.setFieldValue([serviceKey, "baseUrl"], group.base_url);
+          originalBaseUrlRef.current = group.base_url;
+        }
       } else {
         setKeyList([]);
       }
     } catch {
+      if (loadGroupKeysGenRef.current !== gen) return;
       setGroupForActiveService(null);
       setKeyList([]);
     }
+  }
+
+  async function handleBaseUrlChange() {
+    if (!activeService) {
+      return;
+    }
+    const currentUrl = form.getFieldValue([activeService.key, "baseUrl"]) || "";
+    if (currentUrl === originalBaseUrlRef.current) {
+      return;
+    }
+    if (!currentUrl.trim()) {
+      form.setFieldValue([activeService.key, "baseUrl"], originalBaseUrlRef.current);
+      return;
+    }
+
+    const normalizeUrl = (url: string) => url.trim().replace(/\/+$/, "");
+    const isRealChange = normalizeUrl(currentUrl) !== normalizeUrl(originalBaseUrlRef.current);
+
+    if (keyList.length === 0) {
+      // No keys: update backend if group exists, otherwise just update ref
+      if (groupForActiveService) {
+        try {
+          await modelProviderRequest(
+            "PATCH",
+            `/model_providers/${encodeURIComponent(activeService.key)}/groups/${encodeURIComponent(groupForActiveService.id)}`,
+            { base_url: currentUrl },
+          );
+          message.success(t("modelProvider.external.baseUrlChanged"));
+        } catch (error) {
+          message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
+          return;
+        }
+      }
+      originalBaseUrlRef.current = currentUrl;
+      return;
+    }
+
+    if (!isRealChange) {
+      // Trivial change (e.g. trailing slash): PATCH without confirm, keep keyList
+      try {
+        await modelProviderRequest(
+          "PATCH",
+          `/model_providers/${encodeURIComponent(activeService.key)}/groups/${encodeURIComponent(groupForActiveService!.id)}`,
+          { base_url: currentUrl },
+        );
+        message.success(t("modelProvider.external.baseUrlChanged"));
+        originalBaseUrlRef.current = currentUrl;
+      } catch (error) {
+        message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
+      }
+      return;
+    }
+
+    // Real change + has keys: show confirmation dialog, backend will clear keys
+    Modal.confirm({
+      title: t("modelProvider.external.baseUrlChangeTitle"),
+      content: t("modelProvider.external.baseUrlChangeContent", { count: keyList.length }),
+      okText: t("modelProvider.external.confirmChange"),
+      cancelText: t("modelProvider.external.cancelChange"),
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await modelProviderRequest(
+            "PATCH",
+            `/model_providers/${encodeURIComponent(activeService.key)}/groups/${encodeURIComponent(groupForActiveService!.id)}`,
+            { base_url: currentUrl },
+          );
+          setKeyList([]);
+          setGroupForActiveService(null);
+          loadGroupKeysGenRef.current += 1;
+          originalBaseUrlRef.current = currentUrl;
+          void loadExternalServices(normalizedSearchValue);
+        } catch (error) {
+          message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
+        }
+      },
+      onCancel: () => {
+        form.setFieldValue([activeService.key, "baseUrl"], originalBaseUrlRef.current);
+      },
+    });
   }
 
   async function handleAddKey() {
@@ -493,7 +585,7 @@ export default function ExternalServicesPage() {
     try {
       if (!groupForActiveService) {
         // Create group with first key
-        const baseUrl = activeService.baseUrl || "";
+        const baseUrl = form.getFieldValue([activeService.key, "baseUrl"]) || activeService.baseUrl || "";
         const payload: Record<string, unknown> = {
           name: activeService.name,
           base_url: baseUrl,
@@ -574,6 +666,10 @@ export default function ExternalServicesPage() {
     setGroupForActiveService(null);
     void loadGroupKeys(service.key);
     if (service.fields.includes("baseUrl")) {
+      const currentFormValue = form.getFieldValue([service.key, "baseUrl"]);
+      originalBaseUrlRef.current = currentFormValue || service.baseUrl || (
+        normalizeProviderName(service.name) === "mineru" ? mineruDockerComposeBaseUrl : ""
+      );
       window.setTimeout(() => {
         const currentBaseUrl = form.getFieldValue([service.key, "baseUrl"]);
         if (!currentBaseUrl) {
@@ -750,6 +846,7 @@ export default function ExternalServicesPage() {
                     <AutoComplete
                       allowClear
                       filterOption={false}
+                      onBlur={() => handleBaseUrlChange()}
                       options={activeService.baseUrlPresets.map((preset) => ({
                         value: preset.value,
                         label: (
@@ -764,7 +861,7 @@ export default function ExternalServicesPage() {
                       popupClassName="model-provider-service-preset-dropdown"
                     />
                   ) : (
-                    <Input maxLength={512} placeholder="https://api.example.com" />
+                    <Input maxLength={512} onBlur={() => handleBaseUrlChange()} placeholder="https://api.example.com" />
                   )}
                 </Form.Item>
               ) : null}

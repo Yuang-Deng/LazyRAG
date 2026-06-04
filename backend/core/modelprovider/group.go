@@ -269,8 +269,8 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(req.Name)
 	baseURL := strings.TrimSpace(req.BaseURL)
 	apiKey := strings.TrimSpace(req.APIKey)
-	if name == "" || baseURL == "" {
-		common.ReplyErr(w, "name and base_url are required", http.StatusBadRequest)
+	if baseURL == "" {
+		common.ReplyErr(w, "base_url is required", http.StatusBadRequest)
 		return
 	}
 
@@ -300,6 +300,10 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if name == "" {
+		name = row.Name
+	}
+
 	now := time.Now()
 	updates := map[string]interface{}{
 		"name":       name,
@@ -313,15 +317,11 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		updates["base_url"] = row.BaseURL
 	}
 
-	// When the effective base_url matches the catalog default, api_key must not be empty.
-	effectiveBaseURL := baseURL
-	if apiKey == "" && row.APIKey == "" && isDefaultBaseURL(r.Context(), db, parent.DefaultModelProviderID, effectiveBaseURL) {
-		common.ReplyErr(w, "api_key is required when using the default base_url", http.StatusBadRequest)
-		return
-	}
-
-	if baseURL != row.BaseURL {
+	skipVerify := false
+	if normalizeBaseURLForCompare(baseURL) != normalizeBaseURLForCompare(row.BaseURL) {
 		updates["is_verified"] = false
+		updates["api_key"] = ""
+		skipVerify = true
 	}
 	if apiKey != "" {
 		updates["api_key"] = apiKey
@@ -335,7 +335,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	if effectiveAPIKey == "" {
 		effectiveAPIKey = row.APIKey
 	}
-	if shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
+	if !skipVerify && shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
 		if effectiveAPIKey == "" {
 			common.ReplyErrWithData(
 				w,
