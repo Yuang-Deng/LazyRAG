@@ -89,6 +89,8 @@ func main() {
 	}
 	catalogPath := filepath.Join(".", "config", "model_catalog.yaml")
 	modelprovider.MustSeedModelCatalog(context.Background(), db.DB, catalogPath)
+	datasourceCatalogPath := filepath.Join(".", "config", "datasource_catalog.yaml")
+	modelprovider.MustSeedDatasourceCatalog(context.Background(), db.DB, datasourceCatalogPath)
 
 	readonlyDriver := strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_DB_DRIVER"))
 	readonlyDSN := strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_DB_DSN"))

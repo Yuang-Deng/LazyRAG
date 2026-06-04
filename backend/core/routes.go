@@ -214,6 +214,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/model_providers/{model_provider_id}/groups/{group_id}/models", []string{}, modelprovider.ListGroupModels)
 	handleAPI(r, "POST", "/model_providers/{model_provider_id}/groups/{group_id}/models", []string{}, modelprovider.AddGroupModel)
 	handleAPI(r, "DELETE", "/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}", []string{}, modelprovider.DeleteGroupModel)
+	handleAPI(r, "POST", "/model_providers/{model_provider_id}/groups/{group_id}/keys", []string{}, modelprovider.AddKey)
+	handleAPI(r, "DELETE", "/model_providers/{model_provider_id}/groups/{group_id}/keys", []string{}, modelprovider.RemoveKey)
 
 	// ----- Prompttext -----
 	handleAPI(r, "POST", "/prompts", []string{"document.write"}, chat.CreatePrompt)

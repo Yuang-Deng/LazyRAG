@@ -585,3 +585,213 @@ func isDefaultBaseURL(ctx context.Context, db *gorm.DB, defaultProviderID, baseU
 	}
 	return normalizeBaseURLForCompare(baseURL) == normalizeBaseURLForCompare(catalog.BaseURL)
 }
+
+type addKeyRequest struct {
+	APIKey string `json:"api_key"`
+}
+
+type addKeyResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+}
+
+type removeKeyRequest struct {
+	APIKey string `json:"api_key"`
+}
+
+// AddKey validates and appends a single API key to the group.
+// POST /model_providers/{model_provider_id}/groups/{group_id}/keys
+func AddKey(w http.ResponseWriter, r *http.Request) {
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	userID := strings.TrimSpace(store.UserID(r))
+	if userID == "" {
+		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
+		return
+	}
+
+	parentID := strings.TrimSpace(mux.Vars(r)["model_provider_id"])
+	groupID := strings.TrimSpace(mux.Vars(r)["group_id"])
+	if parentID == "" || groupID == "" {
+		common.ReplyErr(w, "missing model_provider_id or group_id", http.StatusBadRequest)
+		return
+	}
+
+	var req addKeyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	newKey := strings.TrimSpace(req.APIKey)
+	if newKey == "" {
+		common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
+		return
+	}
+
+	var parent orm.UserModelProvider
+	err := db.WithContext(r.Context()).
+		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", parentID, userID).
+		Take(&parent).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ReplyErr(w, "model provider not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query model provider failed", http.StatusInternalServerError)
+		return
+	}
+
+	var row orm.UserModelProviderGroup
+	err = db.WithContext(r.Context()).
+		Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parent.ID, userID).
+		Take(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ReplyErr(w, "group not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query group failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Check for duplicate.
+	existing := splitAPIKeys(row.APIKey)
+	for _, k := range existing {
+		if k == newKey {
+			common.ReplyErr(w, "api_key already exists", http.StatusConflict)
+			return
+		}
+	}
+
+	// Verify the key before storing.
+	checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, row.BaseURL, newKey)
+	if checkErr != nil || checkResult == nil || !checkResult.Success {
+		msg := "verification failed"
+		if checkResult != nil && strings.TrimSpace(checkResult.Message) != "" {
+			msg = strings.TrimSpace(checkResult.Message)
+		}
+		common.ReplyErrWithData(w, "verification failed: "+msg, CheckModelProviderData{Success: false, Message: msg}, http.StatusBadGateway)
+		return
+	}
+
+	// Append the new key.
+	existing = append(existing, newKey)
+	updatedKeys := strings.Join(existing, "\n")
+	now := time.Now()
+	if err := db.WithContext(r.Context()).Model(&row).Updates(map[string]interface{}{
+		"api_key":     updatedKeys,
+		"is_verified": true,
+		"updated_at":  now,
+	}).Error; err != nil {
+		common.ReplyErr(w, "update api_key failed", http.StatusInternalServerError)
+		return
+	}
+
+	common.ReplyOK(w, addKeyResponse{Success: true, Message: checkResult.Message})
+}
+
+// RemoveKey removes a specific API key by exact match from the group.
+// DELETE /model_providers/{model_provider_id}/groups/{group_id}/keys
+func RemoveKey(w http.ResponseWriter, r *http.Request) {
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	userID := strings.TrimSpace(store.UserID(r))
+	if userID == "" {
+		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
+		return
+	}
+
+	parentID := strings.TrimSpace(mux.Vars(r)["model_provider_id"])
+	groupID := strings.TrimSpace(mux.Vars(r)["group_id"])
+	if parentID == "" || groupID == "" {
+		common.ReplyErr(w, "missing model_provider_id or group_id", http.StatusBadRequest)
+		return
+	}
+
+	var req removeKeyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	targetKey := strings.TrimSpace(req.APIKey)
+	if targetKey == "" {
+		common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
+		return
+	}
+
+	var parent orm.UserModelProvider
+	err := db.WithContext(r.Context()).
+		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", parentID, userID).
+		Take(&parent).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ReplyErr(w, "model provider not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query model provider failed", http.StatusInternalServerError)
+		return
+	}
+
+	var row orm.UserModelProviderGroup
+	err = db.WithContext(r.Context()).
+		Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parent.ID, userID).
+		Take(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ReplyErr(w, "group not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query group failed", http.StatusInternalServerError)
+		return
+	}
+
+	existing := splitAPIKeys(row.APIKey)
+	found := false
+	filtered := make([]string, 0, len(existing))
+	for _, k := range existing {
+		if k == targetKey {
+			found = true
+		} else {
+			filtered = append(filtered, k)
+		}
+	}
+	if !found {
+		common.ReplyErr(w, "api_key not found", http.StatusNotFound)
+		return
+	}
+
+	now := time.Now()
+	updatedKeys := strings.Join(filtered, "\n")
+	if err := db.WithContext(r.Context()).Model(&row).Updates(map[string]interface{}{
+		"api_key":     updatedKeys,
+		"is_verified": len(filtered) > 0,
+		"updated_at":  now,
+	}).Error; err != nil {
+		common.ReplyErr(w, "update api_key failed", http.StatusInternalServerError)
+		return
+	}
+
+	common.ReplyOK(w, map[string]bool{"success": true})
+}
+
+func splitAPIKeys(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, "\n")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
