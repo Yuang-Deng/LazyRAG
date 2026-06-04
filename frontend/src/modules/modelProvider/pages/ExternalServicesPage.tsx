@@ -783,7 +783,7 @@ export default function ExternalServicesPage() {
                       {visibleKeys.has(idx) ? key : maskAPIKey(key)}
                     </span>
                     <div className="model-provider-key-actions">
-                      <Tooltip title={t("common.copy")}>
+                      <Tooltip title="复制">
                         <Button
                           size="small"
                           type="text"
@@ -791,7 +791,7 @@ export default function ExternalServicesPage() {
                           onClick={() => copyKeyToClipboard(key)}
                         />
                       </Tooltip>
-                      <Tooltip title={visibleKeys.has(idx) ? t("common.hide") : t("common.view")}>
+                      <Tooltip title={visibleKeys.has(idx) ? "隐藏" : "显示"}>
                         <Button
                           size="small"
                           type="text"
