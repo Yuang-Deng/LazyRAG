@@ -24,6 +24,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
+	applog "lazymind/core/log"
 	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
 	"lazymind/core/store"
@@ -1467,6 +1468,11 @@ func buildTaskResponse(r *http.Request, row orm.Task) TaskResponse {
 	var docRow orm.Document
 	if err := store.DB().WithContext(r.Context()).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", row.DocID, row.DatasetID).Take(&docRow).Error; err == nil {
 		lazyDoc = strings.TrimSpace(docRow.LazyllmDocID)
+		docDisplayName := strings.TrimSpace(docRow.DisplayName)
+		if TaskType(strings.TrimSpace(row.TaskType)) == TaskTypeReparse && docDisplayName != "" &&
+			!strings.Contains(resp.DisplayName, docDisplayName) {
+			resp.DisplayName = docDisplayName + " - " + resp.DisplayName
+		}
 		var dExt documentExt
 		_ = json.Unmarshal(docRow.Ext, &dExt)
 		resp.PDFConvertResult = strings.TrimSpace(docRow.PDFConvertResult)
@@ -1534,9 +1540,22 @@ func buildTaskResponse(r *http.Request, row orm.Task) TaskResponse {
 	if isSuccessState(resp.TaskState) {
 		resp.TaskInfo.SucceedDocumentSize = resp.TaskInfo.TotalDocumentSize
 		resp.TaskInfo.SucceedDocumentCount = resp.TaskInfo.TotalDocumentCount
-	} else if resp.TaskState == string(TaskStateFailed) {
+	} else if resp.TaskState == string(TaskStateFailed) || strings.EqualFold(resp.TaskState, "FAILED") {
 		resp.TaskInfo.FailedDocumentSize = resp.TaskInfo.TotalDocumentSize
 		resp.TaskInfo.FailedDocumentCount = resp.TaskInfo.TotalDocumentCount
+	}
+	resp.TaskState = normalizeTaskStateForUI(resp.TaskState)
+	if resp.TaskState == "FAILED" {
+		if resp.ErrMsg == "" {
+			resp.ErrMsg = resp.ConvertError
+		}
+		resp.ErrMsg = mapParseTaskError(resp.ErrMsg)
+		if resp.ErrMsg == "" {
+			resp.ErrMsg = defaultParseTaskErrCode
+		}
+	}
+	if resp.FinishTime == "" && isTerminalTaskStateForUI(resp.TaskState) {
+		resp.FinishTime = row.UpdatedAt.UTC().Format(time.RFC3339)
 	}
 	return resp
 }
@@ -1676,7 +1695,58 @@ func firstNonEmpty(values ...string) string {
 }
 
 func isSuccessState(state string) bool {
-	return state == string(TaskStateSucceeded) || state == "SUCCEEDED"
+	s := strings.ToUpper(strings.TrimSpace(state))
+	return s == string(TaskStateSucceeded) || s == "SUCCEEDED" || s == "SUCCESS"
+}
+
+// normalizeTaskStateForUI maps core/lazyllm task states to the values expected by the
+// knowledge import-task panel (WAITING / WORKING / SUCCESS / FAILED / CANCELED).
+func normalizeTaskStateForUI(state string) string {
+	s := strings.ToUpper(strings.TrimSpace(state))
+	switch s {
+	case string(TaskStateCreating), string(TaskStateUploading), string(TaskStateUploaded):
+		return "WAITING"
+	case string(TaskStateRunning), "STARTED", "SUBMITTED", "PROCESSING":
+		return "WORKING"
+	case string(TaskStateSucceeded):
+		return "SUCCESS"
+	case string(TaskStateFailed):
+		return "FAILED"
+	case string(TaskStateCancelled):
+		return "CANCELED"
+	default:
+		return strings.TrimSpace(state)
+	}
+}
+
+func isTerminalTaskStateForUI(state string) bool {
+	switch strings.ToUpper(strings.TrimSpace(state)) {
+	case "FAILED", "SUCCESS", "CANCELED", "CANCELLED":
+		return true
+	default:
+		return false
+	}
+}
+
+func markTaskStartFailed(ctx context.Context, datasetID string, taskRow orm.Task, errMsg string) {
+	var ext taskExt
+	_ = json.Unmarshal(taskRow.Ext, &ext)
+	ext.TaskState = string(TaskStateFailed)
+	ext.ErrorMessage = strings.TrimSpace(errMsg)
+	if ext.ErrorMessage == "" {
+		ext.ErrorMessage = defaultParseTaskErrCode
+	}
+	now := time.Now().UTC()
+	if err := store.DB().WithContext(ctx).Model(&orm.Task{}).
+		Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", taskRow.ID, datasetID).
+		Updates(map[string]any{"ext": mustJSON(ext), "updated_at": now}).Error; err != nil {
+		applog.Logger.Error().
+			Err(err).
+			Str("handler", "markTaskStartFailed").
+			Str("task_id", taskRow.ID).
+			Str("dataset_id", datasetID).
+			Msg("failed to persist task failure state")
+	}
 }
 
 func maxInt64(a, b int64) int64 {
@@ -2304,7 +2374,7 @@ func createTaskFromExistingDocument(r *http.Request, datasetID, userID, userName
 	if len(tFiles) == 0 && (strings.TrimSpace(dExt.StoredPath) != "" || strings.TrimSpace(dExt.ParseStoredPath) != "") {
 		tFiles = []TaskFile{{DisplayName: displayName, StoredName: dExt.StoredName, StoredPath: dExt.StoredPath, ParseStoredPath: dExt.ParseStoredPath, FileSize: dExt.FileSize, RelativePath: dExt.RelativePath, ContentType: dExt.ContentType}}
 	}
-	tExt := taskExt{TaskType: tType, DocumentPID: documentPID, DisplayName: displayName, TargetDatasetID: strings.TrimSpace(item.Task.TargetDatasetID), TargetPID: strings.TrimSpace(item.Task.TargetPID), TargetPath: strings.TrimSpace(item.Task.TargetPath), DataSourceType: firstNonEmpty(strings.TrimSpace(item.Task.DataSourceType), "LOCAL_FILE"), Files: tFiles, DocumentTags: tags, ReparseGroups: item.Task.ReparseGroups}
+	tExt := taskExt{TaskType: tType, DocumentPID: documentPID, DisplayName: displayName, TargetDatasetID: strings.TrimSpace(item.Task.TargetDatasetID), TargetPID: strings.TrimSpace(item.Task.TargetPID), TargetPath: strings.TrimSpace(item.Task.TargetPath), DataSourceType: firstNonEmpty(strings.TrimSpace(item.Task.DataSourceType), "LOCAL_FILE"), Files: tFiles, DocumentTags: tags, ReparseGroups: item.Task.ReparseGroups, ReparseMode: strings.TrimSpace(item.Task.ReparseMode)}
 	now := time.Now().UTC()
 	taskRow := orm.Task{ID: taskID, LazyllmTaskID: "", DocID: baseDoc.ID, KbID: datasetKbIDByID(datasetID), AlgoID: datasetAlgoIDByID(datasetID), DatasetID: datasetID, TaskType: tType, DocumentPID: documentPID, TargetPID: strings.TrimSpace(item.Task.TargetPID), TargetDatasetID: strings.TrimSpace(item.Task.TargetDatasetID), DisplayName: displayName, Ext: mustJSON(tExt), BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now}}
 	if err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
@@ -2327,6 +2397,13 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 	kbID := datasetKbIDByID(datasetID)
 	results := make([]StartTaskResult, 0, len(taskIDs))
 	userID := common.UserID(r)
+	applog.Logger.Info().
+		Str("handler", "StartReparseTask").
+		Str("dataset_id", datasetID).
+		Str("kb_id", kbID).
+		Int("task_count", len(taskIDs)).
+		Strs("task_ids", taskIDs).
+		Msg("starting reparse tasks")
 	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), userID)
 	if err != nil {
 		log.Printf("[startReparseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
@@ -2338,19 +2415,26 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 	for _, taskID := range taskIDs {
 		var taskRow orm.Task
 		if err := store.DB().WithContext(r.Context()).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", taskID, datasetID).Take(&taskRow).Error; err != nil {
+			applog.Logger.Warn().Str("handler", "StartReparseTask").Str("task_id", taskID).Msg("task not found")
 			results = append(results, StartTaskResult{TaskID: taskID, Status: "FAILED", SubmitStatus: "REJECTED", Message: "task not found"})
 			continue
 		}
 		var docRow orm.Document
 		if err := store.DB().WithContext(r.Context()).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", taskRow.DocID, datasetID).Take(&docRow).Error; err != nil {
+			applog.Logger.Warn().Str("handler", "StartReparseTask").Str("task_id", taskID).Str("doc_id", taskRow.DocID).Msg("document not found")
+			markTaskStartFailed(r.Context(), datasetID, taskRow, "document not found")
 			results = append(results, StartTaskResult{TaskID: taskID, DocumentID: taskRow.DocID, DisplayName: taskRow.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: "document not found"})
 			continue
 		}
 		if isFolderLikeDocument(docRow) {
+			applog.Logger.Warn().Str("handler", "StartReparseTask").Str("task_id", taskID).Str("doc_id", docRow.ID).Msg("folder document cannot be reparsed")
+			markTaskStartFailed(r.Context(), datasetID, taskRow, "folder document cannot be reparsed")
 			results = append(results, StartTaskResult{TaskID: taskID, DocumentID: docRow.ID, DisplayName: docRow.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: "folder document cannot be reparsed"})
 			continue
 		}
 		if strings.TrimSpace(docRow.LazyllmDocID) == "" {
+			applog.Logger.Warn().Str("handler", "StartReparseTask").Str("task_id", taskID).Str("doc_id", docRow.ID).Msg("lazyllm doc id is empty")
+			markTaskStartFailed(r.Context(), datasetID, taskRow, "lazyllm doc id is empty")
 			results = append(results, StartTaskResult{TaskID: taskID, DocumentID: docRow.ID, DisplayName: docRow.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: "lazyllm doc id is empty"})
 			continue
 		}
@@ -2364,18 +2448,48 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 	// Collect ng_names from the first task that has ReparseGroups set.
 	// All tasks in a single reparse batch share the same reparse_groups selection.
 	var ngNames []string
+	reparseMode := "rebuild"
 	for _, taskRow := range taskRows {
 		var ext taskExt
 		_ = json.Unmarshal(taskRow.Ext, &ext)
-		if len(ext.ReparseGroups) > 0 {
+		if len(ngNames) == 0 && len(ext.ReparseGroups) > 0 {
 			ngNames = ext.ReparseGroups
+		}
+		if mode := strings.TrimSpace(ext.ReparseMode); mode != "" {
+			reparseMode = mode
+		}
+		if len(ngNames) > 0 {
 			break
 		}
 	}
-	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, IdempotencyKey: newTaskID(), ModelConfig: llmConfig})
+	// Pass reparse_mode through as the strategy string; only
+	// "slice_and_embed" is renamed to "reembed" for the algorithm.
+	strategy := reparseMode
+	if reparseMode == "slice_and_embed" {
+		strategy = "reembed"
+	}
+	applog.Logger.Info().
+		Str("handler", "StartReparseTask").
+		Str("dataset_id", datasetID).
+		Str("kb_id", kbID).
+		Int("doc_count", len(docIDs)).
+		Strs("doc_ids", docIDs).
+		Strs("ng_names", ngNames).
+		Str("reparse_mode", reparseMode).
+		Str("strategy", strategy).
+		Msg("submitting reparse batch to doc service")
+	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, Strategy: strategy, IdempotencyKey: newTaskID(), ModelConfig: llmConfig})
 	if err != nil {
+		errMsg := common.ResolveAppError(err.Error(), http.StatusBadGateway).Message
+		applog.Logger.Error().
+			Err(err).
+			Str("handler", "StartReparseTask").
+			Str("dataset_id", datasetID).
+			Strs("ng_names", ngNames).
+			Msg("reparse batch submission failed")
 		for i, taskRow := range taskRows {
-			results = append(results, StartTaskResult{TaskID: taskRow.ID, DocumentID: docRows[i].ID, DisplayName: docRows[i].DisplayName, Status: "FAILED", SubmitStatus: "FAILED", Message: common.ResolveAppError(err.Error(), http.StatusBadGateway).Message, Detail: fmt.Sprint(common.ResolveAppError(err.Error(), http.StatusBadGateway).Detail)})
+			markTaskStartFailed(r.Context(), datasetID, taskRow, errMsg)
+			results = append(results, StartTaskResult{TaskID: taskRow.ID, DocumentID: docRows[i].ID, DisplayName: docRows[i].DisplayName, Status: "FAILED", SubmitStatus: "FAILED", Message: errMsg, Detail: fmt.Sprint(common.ResolveAppError(err.Error(), http.StatusBadGateway).Detail)})
 		}
 		return results, err
 	}
@@ -2403,6 +2517,12 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 		})
 		results = append(results, StartTaskResult{TaskID: taskRow.ID, DocumentID: docRows[i].ID, DisplayName: docRows[i].DisplayName, Status: "STARTED", SubmitStatus: "SUBMITTED"})
 	}
+	applog.Logger.Info().
+		Str("handler", "StartReparseTask").
+		Str("dataset_id", datasetID).
+		Int("started_count", len(taskRows)).
+		Strs("ng_names", ngNames).
+		Msg("reparse tasks submitted")
 	return results, nil
 }
 

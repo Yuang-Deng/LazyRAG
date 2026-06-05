@@ -3,7 +3,7 @@ from urllib.parse import urlparse
 import lazyllm
 from lazyllm.tracing import set_trace_context
 from lazyllm import AutoModel
-from lazyllm.tools.rag import Document, MineruPDFReader, PDFReader
+from lazyllm.tools.rag import Document, LLMParser, MineruPDFReader, PDFReader
 from lazyllm.tools.rag.doc_impl import NodeGroupType
 from lazyllm.tools.rag.parsing_service import DocumentProcessor
 from lazyllm.tools.rag.readers import PaddleOCRPDFReader
@@ -135,7 +135,7 @@ def reset_stores() -> None:
     def _col(group: str) -> str:
         return _pat.sub('_', f'col_{group}'.lower()).strip('_')
 
-    activated_groups = ['block', 'line', 'image', '__lazyllm_root__', '__lazyllm_image__']
+    activated_groups = ['block', 'line', 'doc-summary', 'image', '__lazyllm_root__', '__lazyllm_image__']
     store_conf = _build_store_config(EMBED_INDEX_KWARGS)
 
     milvus_cfg = (store_conf.get('vector_store') or {}).get('kwargs', {})
@@ -237,6 +237,13 @@ def build_document() -> Document:
                            group_type=NodeGroupType.CHUNK, transform=GeneralParser(max_length=2048, split_by='\n'))
     docs.create_node_group(name='line', display_name='sentence slice',
                            group_type=NodeGroupType.CHUNK, transform=LineSplitter, parent='block')
+    docs.create_node_group(
+        name='doc-summary',
+        display_name='document summary',
+        group_type=NodeGroupType.SUMMARY,
+        transform=LLMParser(AutoModel(model='llm'), language='zh', task_type='summary'),
+        lazy_mode='all',
+    )
 
     # Only source=dynamic embed_image needs lazy mode; static configs are always ready.
     if EMBED_IMAGE in get_dynamic_role_slot_map():
@@ -245,6 +252,7 @@ def build_document() -> Document:
     docs.activate_group('image', embed_keys=EMBED_IMAGE)
     docs.activate_group('block', embed_keys=[EMBED_MAIN])
     docs.activate_group('line', embed_keys=[EMBED_MAIN])
+    docs.activate_group('doc-summary', embed_keys=[EMBED_MAIN])
     docs._manager._kbs = lazyllm.ServerModule(
         _quiet_trace(docs._manager._kbs),
         port=server_port,
