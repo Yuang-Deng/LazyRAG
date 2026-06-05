@@ -1796,6 +1796,12 @@ const enUS = {
     memorySkillPendingRemoveTag: "Delete Suggested",
     memorySkillAutoEvoDisabledByRemove:
       "This skill has a delete suggestion, so auto evolution cannot be enabled",
+    memoryBuiltinSkillTemplateTag: "Built-in",
+    memoryBuiltinSkillEnabledTag: "From Built-in",
+    memoryBuiltinSkillEnable: "Enable",
+    memoryBuiltinSkillMissing: "Built-in skill identifier is missing",
+    memoryBuiltinSkillEnableSuccess: "Built-in skill enabled",
+    memoryBuiltinSkillEnableFailed: "Failed to enable built-in skill",
     memorySkillParent: "Primary Skill",
     memorySkillChild: "Subskill",
     memoryParentSkill: "Primary Skill",

@@ -155,6 +155,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PUT", "/personalization-setting", []string{"qa.read"}, evolution.SetPersonalizationSetting)
 	handleAPI(r, "GET", "/skills", []string{"qa.read"}, skill.List)
 	handleAPI(r, "POST", "/skills", []string{"qa.read"}, skill.CreateManaged)
+	handleAPI(r, "POST", "/builtin-skills/{builtin_skill_uid}:enable", []string{"qa.read"}, skill.EnableBuiltinSkill)
 	handleAPI(r, "GET", "/skills/{skill_id}:shares", []string{"qa.read"}, skill.ListSkillShareTargets)
 	handleAPI(r, "GET", "/skill-shares/incoming", []string{"qa.read"}, skill.IncomingShares)
 	handleAPI(r, "GET", "/skill-shares/outgoing", []string{"qa.read"}, skill.OutgoingShares)
