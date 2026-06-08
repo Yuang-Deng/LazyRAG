@@ -6,8 +6,8 @@ func TestGenerateURLUsesChatServiceEndpoint(t *testing.T) {
 	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo-service.invalid")
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", "http://chat-service:8046")
 
-	got := generateURL("/api/chat/memory/generate")
-	want := "http://chat-service:8046/api/chat/memory/generate"
+	got := generateURL(llmGeneratePath)
+	want := "http://chat-service:8046/api/chat/llm_generate"
 	if got != want {
 		t.Fatalf("expected generate URL %q, got %q", want, got)
 	}

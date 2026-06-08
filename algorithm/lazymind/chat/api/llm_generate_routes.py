@@ -9,11 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic import model_validator
 
 from lazymind.model_config import inject_model_config
-from lazymind.review.service.memory_generate import (
+from lazymind.chat.service.llm_generate import (
     BadRequestError,
-    MemoryType,
+    LlmGenerateTaskType,
     UnprocessableContentError,
-    generate_memory_content,
+    generate_llm_content,
 )
 
 router = APIRouter()
@@ -22,6 +22,7 @@ router = APIRouter()
 class GeneratePayload(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
+    task_type: LlmGenerateTaskType = Field(..., description='Generation task type')
     content: str = Field(..., description='Current full text of the target content')
     user_instruct: str = Field(..., description='Natural language instruction directly from the user')
     llm_config: Dict[str, Any] = Field(
@@ -37,18 +38,19 @@ class GeneratePayload(BaseModel):
         return self
 
 
-def _init_generate_session(memory_type: MemoryType, model_config: Dict[str, Any]) -> None:
-    session_id = f'{memory_type}_generate_{uuid4().hex}'
+def _init_generate_session(task_type: LlmGenerateTaskType, model_config: Dict[str, Any]) -> None:
+    session_id = f'{task_type}_generate_{uuid4().hex}'
     lazyllm.globals._init_sid(sid=session_id)
     lazyllm.locals._init_sid(sid=session_id)
     inject_model_config(model_config)
 
 
-def _handle_generate(memory_type: MemoryType, payload: GeneratePayload):
+@router.post('/api/chat/llm_generate', summary='Generate text content with LLM by task type')
+async def llm_generate(payload: GeneratePayload):
     try:
-        _init_generate_session(memory_type, payload.llm_config)
-        generated = generate_memory_content(
-            memory_type=memory_type,
+        _init_generate_session(payload.task_type, payload.llm_config)
+        generated = generate_llm_content(
+            task_type=payload.task_type,
             content=payload.content,
             user_instruct=payload.user_instruct,
         )
@@ -59,18 +61,3 @@ def _handle_generate(memory_type: MemoryType, payload: GeneratePayload):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f'generate failed: {exc}') from exc
-
-
-@router.post('/api/chat/skill/generate', summary='Generate new skill content')
-async def generate_skill(payload: GeneratePayload):
-    return _handle_generate('skill', payload)
-
-
-@router.post('/api/chat/memory/generate', summary='Generate new memory content')
-async def generate_memory(payload: GeneratePayload):
-    return _handle_generate('memory', payload)
-
-
-@router.post('/api/chat/user_preference/generate', summary='Generate new user_preference content')
-async def generate_user_preference(payload: GeneratePayload):
-    return _handle_generate('user_preference', payload)

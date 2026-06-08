@@ -43,9 +43,7 @@ Core 调用的端点:
 | --- | --- | --- | --- |
 | POST | `/api/chat` | 非流式问答 | `chat/conversation_logic.go`, `chat/chat.go` |
 | POST | `/api/chat/stream` | 流式问答 | `chat/chat.go`, `chat/conversation_logic.go` |
-| POST | `/api/chat/skill/generate` | 技能内容生成 | `algo/generate_client.go`, `skill/management.go` |
-| POST | `/api/chat/memory/generate` | 记忆内容生成 | `algo/generate_client.go`, `memory/handler.go` |
-| POST | `/api/chat/user_preference/generate` | 用户偏好生成 | `algo/generate_client.go`, `preference/handler.go` |
+| POST | `/api/chat/llm_generate` | 按 `task_type` 生成技能、记忆、用户偏好或润色 prompt | `algo/generate_client.go`, `skill/management.go`, `memory/handler.go`, `preference/handler.go` |
 | POST | `/api/model/check` | 校验模型 provider/group 的连通性 | `modelprovider/check.go` |
 | POST | `/api/vocab/reload` | 词组变更后通知词表刷新 | `wordgroup/wordgroup.go` |
 | POST | `/api/vocab/extract` | 启动后立即执行并按周期抽取词表 | `wordgroup/vocab_extract_schedule.go` |
@@ -125,4 +123,3 @@ flowchart LR
   Core --> DocSvc
   Core --> Evo
 ```
-

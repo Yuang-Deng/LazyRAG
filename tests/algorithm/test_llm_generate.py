@@ -1,25 +1,11 @@
-import importlib.util
 import sys
-from pathlib import Path
 from types import ModuleType
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
-def _load_memory_generate_module():
-    module_path = (
-        Path(__file__).resolve().parents[2]
-        / 'algorithm/lazymind/review/service/memory_generate/__init__.py'
-    )
-    spec = importlib.util.spec_from_file_location(
-        'test_memory_generate_module',
-        module_path,
-        submodule_search_locations=[str(module_path.parent)],
-    )
-    assert spec is not None
-    assert spec.loader is not None
-
+def _load_llm_generate_module():
     fake_lazyllm = ModuleType('lazyllm')
     fake_lazyllm.AutoModel = lambda *args, **kwargs: object()
 
@@ -35,14 +21,24 @@ def _load_memory_generate_module():
         'lazymind.model_config': sys.modules.get('lazymind.model_config'),
     }
 
-    module = importlib.util.module_from_spec(spec)
     try:
         sys.modules['lazyllm'] = fake_lazyllm
         sys.modules['lazymind.chat.engine.tools.infra'] = fake_tool_infra
         sys.modules['lazymind.model_config'] = fake_load_config
-        sys.modules[spec.name] = module
-        spec.loader.exec_module(module)
-        return module
+
+        from algorithm.lazymind.chat.service.llm_generate import base
+        from algorithm.lazymind.chat.service.llm_generate import memory
+        from algorithm.lazymind.chat.service.llm_generate import preference
+
+        ns = ModuleType('test_llm_generate_module')
+        ns.BadRequestError = base.BadRequestError
+        ns._apply_memory_edit_operations = memory._apply_memory_edit_operations
+        ns._apply_user_preference_edit_operations = preference._apply_user_preference_edit_operations
+        ns._PROMPT_BUILDERS = base._PROMPT_BUILDERS
+        ns._compact_memory_to_recent_week = memory._compact_memory_to_recent_week
+        ns._format_inputs_block = base._format_inputs_block
+        ns.generate_llm_content = base.generate_llm_content
+        return ns
     finally:
         for name, original in original_modules.items():
             if original is None:
@@ -51,22 +47,22 @@ def _load_memory_generate_module():
                 sys.modules[name] = original
 
 
-memory_generate = _load_memory_generate_module()
-BadRequestError = memory_generate.BadRequestError
-_apply_memory_edit_operations = memory_generate._apply_memory_edit_operations
-_apply_operations = memory_generate._apply_operations
-_build_generate_prompt = memory_generate._build_generate_prompt
-_compact_memory_to_recent_week = memory_generate._compact_memory_to_recent_week
-_format_inputs_block = memory_generate._format_inputs_block
-generate_memory_content = memory_generate.generate_memory_content
+llm_generate = _load_llm_generate_module()
+BadRequestError = llm_generate.BadRequestError
+_apply_memory_edit_operations = llm_generate._apply_memory_edit_operations
+_apply_user_preference_edit_operations = llm_generate._apply_user_preference_edit_operations
+_PROMPT_BUILDERS = llm_generate._PROMPT_BUILDERS
+_compact_memory_to_recent_week = llm_generate._compact_memory_to_recent_week
+_format_inputs_block = llm_generate._format_inputs_block
+generate_llm_content = llm_generate.generate_llm_content
 
 
-def _load_memory_generate_routes_module():
+def _load_llm_generate_routes_module():
     module_path = (
         Path(__file__).resolve().parents[2]
-        / 'algorithm/lazymind/review/api/memory_generate_routes.py'
+        / 'algorithm/lazymind/chat/api/llm_generate_routes.py'
     )
-    spec = importlib.util.spec_from_file_location('test_memory_generate_routes', module_path)
+    spec = importlib.util.spec_from_file_location('test_llm_generate_routes', module_path)
     assert spec is not None
     assert spec.loader is not None
 
@@ -79,14 +75,14 @@ def _load_memory_generate_routes_module():
     original_modules = {
         'lazyllm': sys.modules.get('lazyllm'),
         'lazymind.model_config': sys.modules.get('lazymind.model_config'),
-        'lazymind.review.service.memory_generate': sys.modules.get('lazymind.review.service.memory_generate'),
+        'lazymind.chat.service.llm_generate': sys.modules.get('lazymind.chat.service.llm_generate'),
     }
 
     module = importlib.util.module_from_spec(spec)
     try:
         sys.modules['lazyllm'] = fake_lazyllm
         sys.modules['lazymind.model_config'] = fake_model_config
-        sys.modules['lazymind.review.service.memory_generate'] = memory_generate
+        sys.modules['lazymind.chat.service.llm_generate'] = llm_generate
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         module.GeneratePayload.model_rebuild()
@@ -109,10 +105,10 @@ def test_format_inputs_block_includes_required_user_instruct():
     assert '2) suggestions' not in block
 
 
-def test_generate_memory_content_requires_user_instruct():
+def test_generate_llm_content_requires_user_instruct():
     try:
-        generate_memory_content(
-            memory_type='memory',
+        generate_llm_content(
+            task_type='memory',
             content='old content',
             user_instruct='  ',
         )
@@ -123,9 +119,8 @@ def test_generate_memory_content_requires_user_instruct():
 
 
 def test_generate_prompts_include_stale_content_governance():
-    for memory_type in ('skill', 'memory'):
-        prompt = _build_generate_prompt(
-            memory_type=memory_type,
+    for task_type in ('skill', 'memory', 'user_preference'):
+        prompt = _PROMPT_BUILDERS[task_type](
             content='old content that may now be stale',
             user_instruct='Outdated=TRUE: replace old KB failure diagnosis with the current service-level cause.',
         )
@@ -140,16 +135,15 @@ def test_generate_prompts_include_stale_content_governance():
         assert 'upsert' not in prompt
 
 
-def test_user_preference_prompt_has_no_memory_length_limit():
-    prompt = _build_generate_prompt(
-        memory_type='user_preference',
-        content='old preference',
-        user_instruct='Add a stable preference.',
+def test_polish_prompt_asks_model_to_rewrite_without_answering():
+    prompt = _PROMPT_BUILDERS['polish'](
+        content='怎么写一个RAG系统',
+        user_instruct='让问题更清晰',
     )
 
-    assert '1500' not in prompt
-    assert 'Remaining budget before applying user_instruct' not in prompt
-    assert 'final content must be within' not in prompt
+    assert 'task type: polish' in prompt
+    assert 'Do not answer the prompt.' in prompt
+    assert '{"content": "<new complete text>"}' in prompt
 
 
 def test_memory_edit_operations_use_replace_text_to_add_day_and_edit_text():
@@ -242,7 +236,7 @@ def test_memory_compaction_keeps_recent_week_and_summarizes_older_records():
 
 
 def test_user_preference_edit_operations_can_clear_all_content_via_replace_all():
-    edited = _apply_operations(
+    edited = _apply_user_preference_edit_operations(
         'Prefers concise replies',
         {
             'operations': [
@@ -252,32 +246,32 @@ def test_user_preference_edit_operations_can_clear_all_content_via_replace_all()
                 },
             ],
         },
-        entity_name='user_preference',
     )
 
     assert edited == ''
 
 
-def test_memory_generate_route_requires_user_instruct_and_llm_config(monkeypatch):
-    memory_generate_routes = _load_memory_generate_routes_module()
+def test_llm_generate_route_requires_user_instruct_and_llm_config(monkeypatch):
+    llm_generate_routes = _load_llm_generate_routes_module()
     app = FastAPI()
-    app.include_router(memory_generate_routes.router)
+    app.include_router(llm_generate_routes.router)
     client = TestClient(app)
 
-    def fake_generate_memory_content(**kwargs):
-        assert 'suggestions' not in kwargs
+    def fake_generate_llm_content(**kwargs):
+        assert kwargs['task_type'] == 'polish'
         assert kwargs['user_instruct'] == 'Apply change'
         return 'new content'
 
     monkeypatch.setattr(
-        memory_generate_routes,
-        'generate_memory_content',
-        fake_generate_memory_content,
+        llm_generate_routes,
+        'generate_llm_content',
+        fake_generate_llm_content,
     )
 
     response = client.post(
-        '/api/chat/memory/generate',
+        '/api/chat/llm_generate',
         json={
+            'task_type': 'polish',
             'content': 'old content',
             'user_instruct': 'Apply change',
             'llm_config': {},
@@ -288,22 +282,34 @@ def test_memory_generate_route_requires_user_instruct_and_llm_config(monkeypatch
     assert response.json() == {'content': 'new content'}
 
 
-def test_memory_generate_route_rejects_missing_user_instruct_or_llm_config():
-    memory_generate_routes = _load_memory_generate_routes_module()
+def test_llm_generate_route_rejects_missing_user_instruct_or_llm_config():
+    llm_generate_routes = _load_llm_generate_routes_module()
     app = FastAPI()
-    app.include_router(memory_generate_routes.router)
+    app.include_router(llm_generate_routes.router)
     client = TestClient(app)
 
     response = client.post(
-        '/api/chat/memory/generate',
-        json={'content': 'old content', 'llm_config': {}},
+        '/api/chat/llm_generate',
+        json={'task_type': 'memory', 'content': 'old content', 'llm_config': {}},
     )
 
     assert response.status_code == 422
 
     response = client.post(
-        '/api/chat/memory/generate',
-        json={'content': 'old content', 'user_instruct': 'Apply change'},
+        '/api/chat/llm_generate',
+        json={'task_type': 'memory', 'content': 'old content', 'user_instruct': 'Apply change'},
+    )
+
+    assert response.status_code == 422
+
+    response = client.post(
+        '/api/chat/llm_generate',
+        json={
+            'task_type': 'unknown',
+            'content': 'old content',
+            'user_instruct': 'Apply change',
+            'llm_config': {},
+        },
     )
 
     assert response.status_code == 422
