@@ -14,14 +14,12 @@ def create_app() -> FastAPI:
     from lazymind.chat.api import (
         model_features_routes,
     )
-    from lazymind.review.api import vocab_routes
 
     app.include_router(health_routes.router)
     app.include_router(chat_routes.router)
     app.include_router(llm_generate_routes.router)
     app.include_router(model_features_routes.router)
     app.include_router(model_check_routes.router)
-    app.include_router(vocab_routes.router)
     return app
 
 

@@ -191,8 +191,6 @@ func main() {
 		w.Write(swaggerUIHTML)
 	}).Methods(http.MethodGet)
 
-	go wordgroup.StartPeriodicVocabExtract(context.Background())
-
 	log.Logger.Info().Msg("Core listening on :8000")
 	if err := http.ListenAndServe(":8000", r); err != nil {
 		log.Logger.Fatal().Err(err).Msg("http listen failed")
