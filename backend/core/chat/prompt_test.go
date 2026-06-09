@@ -29,14 +29,14 @@ func newPromptTestDB(t *testing.T) *orm.DB {
 	return db
 }
 
-func TestPolishPromptCallsLLMGenerate(t *testing.T) {
+func TestPolishPromptCallsRewrite(t *testing.T) {
 	db := newPromptTestDB(t)
 	corestore.Init(db.DB, nil, nil)
 	t.Cleanup(func() { corestore.Init(nil, nil, nil) })
 
 	var algoBody map[string]any
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/chat/llm_generate" {
+		if r.URL.Path != "/api/chat/rewrite" {
 			http.NotFound(w, r)
 			return
 		}

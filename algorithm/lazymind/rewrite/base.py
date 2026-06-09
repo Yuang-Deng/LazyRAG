@@ -12,9 +12,9 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     _repair_json = None
 
-LlmGenerateTaskType = Literal['skill', 'memory', 'user_preference', 'polish']
+RewriteTaskType = Literal['skill', 'memory', 'user_preference', 'polish']
 
-_MAX_GENERATE_ATTEMPTS = 3
+_MAX_REWRITE_ATTEMPTS = 3
 _MAX_MANAGED_CONTENT_CHARS = 1500
 _JSON_BLOCK_RE = re.compile(r'```json\s*(.*?)\s*```', re.DOTALL)
 _THINK_BLOCK_RE = re.compile(r'<think>.*?</think\s*>', re.DOTALL | re.IGNORECASE)
@@ -120,7 +120,7 @@ def _extract_single_string_field_object(text: str) -> Optional[Dict[str, str]]:
 # Validation
 # ---------------------------------------------------------------------------
 
-def _validate_generated_content(task_type: LlmGenerateTaskType, content: Any) -> str:
+def _validate_generated_content(task_type: RewriteTaskType, content: Any) -> str:
     if not isinstance(content, str):
         raise UnprocessableContentError("Generated field 'content' must be a string.")
 
@@ -349,11 +349,11 @@ _EDIT_DISPATCH: Dict[str, Any] = {}
 
 
 # ---------------------------------------------------------------------------
-# Generate
+# Rewrite
 # ---------------------------------------------------------------------------
 
-def generate_llm_content(
-    task_type: LlmGenerateTaskType,
+def rewrite_content(
+    task_type: RewriteTaskType,
     content: Any,
     user_instruct: Any,
 ) -> str:
@@ -369,7 +369,7 @@ def generate_llm_content(
         content = _compact_memory_to_recent_week(content)
 
     error: Optional[str] = None
-    for _ in range(_MAX_GENERATE_ATTEMPTS):
+    for _ in range(_MAX_REWRITE_ATTEMPTS):
         prompt = _PROMPT_BUILDERS[task_type](
             content=content,
             user_instruct=normalized_user_instruct,
@@ -388,5 +388,5 @@ def generate_llm_content(
             error = str(exc)
 
     raise UnprocessableContentError(
-        f'Failed to generate valid content after {_MAX_GENERATE_ATTEMPTS} attempts: {error}'
+        f'Failed to generate valid content after {_MAX_REWRITE_ATTEMPTS} attempts: {error}'
     )

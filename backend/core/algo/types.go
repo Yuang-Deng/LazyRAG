@@ -1,6 +1,6 @@
 package algo
 
-type LLMGenerateRequest struct {
+type RewriteRequest struct {
 	TaskType     string         `json:"task_type"`
 	Content      string         `json:"content"`
 	UserInstruct string         `json:"user_instruct"`

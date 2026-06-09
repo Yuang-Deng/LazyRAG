@@ -1,11 +1,13 @@
+import importlib
 import sys
+from pathlib import Path
 from types import ModuleType
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
-def _load_llm_generate_module():
+def _load_rewrite_module():
     fake_lazyllm = ModuleType('lazyllm')
     fake_lazyllm.AutoModel = lambda *args, **kwargs: object()
 
@@ -26,18 +28,18 @@ def _load_llm_generate_module():
         sys.modules['lazymind.chat.engine.tools.infra'] = fake_tool_infra
         sys.modules['lazymind.model_config'] = fake_load_config
 
-        from algorithm.lazymind.chat.service.llm_generate import base
-        from algorithm.lazymind.chat.service.llm_generate import memory
-        from algorithm.lazymind.chat.service.llm_generate import preference
+        from algorithm.lazymind.rewrite import base
+        from algorithm.lazymind.rewrite import memory
+        from algorithm.lazymind.rewrite import preference
 
-        ns = ModuleType('test_llm_generate_module')
+        ns = ModuleType('test_rewrite_module')
         ns.BadRequestError = base.BadRequestError
         ns._apply_memory_edit_operations = memory._apply_memory_edit_operations
         ns._apply_user_preference_edit_operations = preference._apply_user_preference_edit_operations
         ns._PROMPT_BUILDERS = base._PROMPT_BUILDERS
         ns._compact_memory_to_recent_week = memory._compact_memory_to_recent_week
         ns._format_inputs_block = base._format_inputs_block
-        ns.generate_llm_content = base.generate_llm_content
+        ns.rewrite_content = base.rewrite_content
         return ns
     finally:
         for name, original in original_modules.items():
@@ -47,22 +49,22 @@ def _load_llm_generate_module():
                 sys.modules[name] = original
 
 
-llm_generate = _load_llm_generate_module()
-BadRequestError = llm_generate.BadRequestError
-_apply_memory_edit_operations = llm_generate._apply_memory_edit_operations
-_apply_user_preference_edit_operations = llm_generate._apply_user_preference_edit_operations
-_PROMPT_BUILDERS = llm_generate._PROMPT_BUILDERS
-_compact_memory_to_recent_week = llm_generate._compact_memory_to_recent_week
-_format_inputs_block = llm_generate._format_inputs_block
-generate_llm_content = llm_generate.generate_llm_content
+rewrite = _load_rewrite_module()
+BadRequestError = rewrite.BadRequestError
+_apply_memory_edit_operations = rewrite._apply_memory_edit_operations
+_apply_user_preference_edit_operations = rewrite._apply_user_preference_edit_operations
+_PROMPT_BUILDERS = rewrite._PROMPT_BUILDERS
+_compact_memory_to_recent_week = rewrite._compact_memory_to_recent_week
+_format_inputs_block = rewrite._format_inputs_block
+rewrite_content = rewrite.rewrite_content
 
 
-def _load_llm_generate_routes_module():
+def _load_rewrite_routes_module():
     module_path = (
         Path(__file__).resolve().parents[2]
-        / 'algorithm/lazymind/chat/api/llm_generate_routes.py'
+        / 'algorithm/lazymind/rewrite/api/rewrite_routes.py'
     )
-    spec = importlib.util.spec_from_file_location('test_llm_generate_routes', module_path)
+    spec = importlib.util.spec_from_file_location('test_rewrite_routes', module_path)
     assert spec is not None
     assert spec.loader is not None
 
@@ -75,17 +77,17 @@ def _load_llm_generate_routes_module():
     original_modules = {
         'lazyllm': sys.modules.get('lazyllm'),
         'lazymind.model_config': sys.modules.get('lazymind.model_config'),
-        'lazymind.chat.service.llm_generate': sys.modules.get('lazymind.chat.service.llm_generate'),
+        'lazymind.rewrite': sys.modules.get('lazymind.rewrite'),
     }
 
     module = importlib.util.module_from_spec(spec)
     try:
         sys.modules['lazyllm'] = fake_lazyllm
         sys.modules['lazymind.model_config'] = fake_model_config
-        sys.modules['lazymind.chat.service.llm_generate'] = llm_generate
+        sys.modules['lazymind.rewrite'] = rewrite
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
-        module.GeneratePayload.model_rebuild()
+        module.RewritePayload.model_rebuild()
         return module
     finally:
         for name, original in original_modules.items():
@@ -105,9 +107,9 @@ def test_format_inputs_block_includes_required_user_instruct():
     assert '2) suggestions' not in block
 
 
-def test_generate_llm_content_requires_user_instruct():
+def test_rewrite_content_requires_user_instruct():
     try:
-        generate_llm_content(
+        rewrite_content(
             task_type='memory',
             content='old content',
             user_instruct='  ',
@@ -251,25 +253,25 @@ def test_user_preference_edit_operations_can_clear_all_content_via_replace_all()
     assert edited == ''
 
 
-def test_llm_generate_route_requires_user_instruct_and_llm_config(monkeypatch):
-    llm_generate_routes = _load_llm_generate_routes_module()
+def test_rewrite_route_requires_user_instruct_and_llm_config(monkeypatch):
+    rewrite_routes = _load_rewrite_routes_module()
     app = FastAPI()
-    app.include_router(llm_generate_routes.router)
+    app.include_router(rewrite_routes.router)
     client = TestClient(app)
 
-    def fake_generate_llm_content(**kwargs):
+    def fake_rewrite_content(**kwargs):
         assert kwargs['task_type'] == 'polish'
         assert kwargs['user_instruct'] == 'Apply change'
         return 'new content'
 
     monkeypatch.setattr(
-        llm_generate_routes,
-        'generate_llm_content',
-        fake_generate_llm_content,
+        rewrite_routes,
+        'rewrite_content',
+        fake_rewrite_content,
     )
 
     response = client.post(
-        '/api/chat/llm_generate',
+        '/api/chat/rewrite',
         json={
             'task_type': 'polish',
             'content': 'old content',
@@ -282,28 +284,28 @@ def test_llm_generate_route_requires_user_instruct_and_llm_config(monkeypatch):
     assert response.json() == {'content': 'new content'}
 
 
-def test_llm_generate_route_rejects_missing_user_instruct_or_llm_config():
-    llm_generate_routes = _load_llm_generate_routes_module()
+def test_rewrite_route_rejects_missing_user_instruct_or_llm_config():
+    rewrite_routes = _load_rewrite_routes_module()
     app = FastAPI()
-    app.include_router(llm_generate_routes.router)
+    app.include_router(rewrite_routes.router)
     client = TestClient(app)
 
     response = client.post(
-        '/api/chat/llm_generate',
+        '/api/chat/rewrite',
         json={'task_type': 'memory', 'content': 'old content', 'llm_config': {}},
     )
 
     assert response.status_code == 422
 
     response = client.post(
-        '/api/chat/llm_generate',
+        '/api/chat/rewrite',
         json={'task_type': 'memory', 'content': 'old content', 'user_instruct': 'Apply change'},
     )
 
     assert response.status_code == 422
 
     response = client.post(
-        '/api/chat/llm_generate',
+        '/api/chat/rewrite',
         json={
             'task_type': 'unknown',
             'content': 'old content',

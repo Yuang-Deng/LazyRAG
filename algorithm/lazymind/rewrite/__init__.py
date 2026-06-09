@@ -1,12 +1,12 @@
-"""LLM generate service — unified content generation for skill, memory, user_preference, and polish."""
+"""Rewrite service — unified content generation for skill, memory, user_preference, and polish."""
 
 from __future__ import annotations
 
 from .base import (
     BadRequestError,
-    LlmGenerateTaskType,
+    RewriteTaskType,
     UnprocessableContentError,
-    generate_llm_content,
+    rewrite_content,
 )
 
 # Import business modules to register their prompt builders and edit dispatch
@@ -17,7 +17,7 @@ from . import polish  # noqa: F401
 
 __all__ = [
     'BadRequestError',
-    'LlmGenerateTaskType',
+    'RewriteTaskType',
     'UnprocessableContentError',
-    'generate_llm_content',
+    'rewrite_content',
 ]

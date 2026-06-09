@@ -365,7 +365,7 @@ func TestGenerateOverwritesExistingPendingDraft(t *testing.T) {
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/chat/llm_generate" {
+		if r.URL.Path != "/api/chat/rewrite" {
 			http.NotFound(w, r)
 			return
 		}
@@ -467,7 +467,7 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 
 	var algoBody map[string]any
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/chat/llm_generate" {
+		if r.URL.Path != "/api/chat/rewrite" {
 			http.NotFound(w, r)
 			return
 		}
