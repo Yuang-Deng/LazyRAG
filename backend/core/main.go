@@ -22,7 +22,6 @@ import (
 	"lazymind/core/migrate"
 	"lazymind/core/modelprovider"
 	"lazymind/core/store"
-	"lazymind/core/wordgroup"
 )
 
 //go:embed docs.html
