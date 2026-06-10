@@ -17,7 +17,7 @@ from lazymind.chat.engine.prompts import build_system_prompt
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
     DEFAULT_TOOLS,
-    filter_tools,
+    build_agent_tools,
     normalize_history_for_agent,
 )
 from lazymind.chat.service.utils import (
@@ -32,6 +32,7 @@ from lazyllm.tools.fs.client import FS
 from lazymind.model_config import inject_model_config, summarize_model_config_for_log
 from lazyllm.tools.tool_config_inject import inject_tool_config
 from lazyllm import AutoModel
+from lazyllm.tools.mcp.client import MCPClient
 from lazymind.config import config as _cfg
 
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
@@ -58,7 +59,6 @@ def check_sensitive_content(
 
 def _build_mcp_tools(mcp_config: List[Dict[str, Any]]) -> list:
     """Build MCP tool list from mcp_config. Skip individual servers on failure with a warning."""
-    from lazyllm.tools.mcp.client import MCPClient
     tools = []
     for server in mcp_config:
         try:
@@ -142,9 +142,11 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     inject_model_config(model_config)
     inject_tool_config(tool_config)
     lazyllm.globals['agentic_config'] = agentic_config
-    active_configs = filter_tools(DEFAULT_TOOLS, disabled_tools)
+    disabled = set(disabled_tools or [])
+    active_configs = [cfg for cfg in DEFAULT_TOOLS if cfg.name not in disabled]
+    agent_tools = build_agent_tools(active_configs)
     mcp_tools = _build_mcp_tools(mcp_config) if mcp_config else []
-    all_tools = [cfg.instance for cfg in active_configs] + mcp_tools
+    all_tools = agent_tools + mcp_tools
     set_trace_context({
         'enabled': bool(trace),
         'trace_id': session_id if trace else None,
