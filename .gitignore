@@ -34,6 +34,7 @@ wget-log
 .codex
 .codex-gocache/
 .codex-gomodcache/
+.reasonix
 
 # docs
 lazyllm_chroma/
