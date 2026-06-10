@@ -12,6 +12,7 @@ from lazyllm.tools.tools.search import (
     BochaSearch,
     GoogleSearch,
     SciverseSearch,
+    TavilySearch,
     WikipediaSearch,
 )
 
@@ -60,6 +61,7 @@ _CONFIG_CHECK_TOOL_GROUPS = {
     'google',
     'bing',
     'bocha',
+    'tavily',
     'feishu',
 }
 
@@ -118,6 +120,12 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         label='Bocha 搜索',
         description='使用 Bocha 搜索引擎检索互联网内容',
         instance=BochaSearch(),
+    ),
+    ToolGroupConfig(
+        name='tavily',
+        label='Tavily 搜索',
+        description='使用 Tavily Search API 检索互联网内容，支持深度搜索和 AI 摘要',
+        instance=TavilySearch(),
     ),
     ToolGroupConfig(
         name='url_fetch',
