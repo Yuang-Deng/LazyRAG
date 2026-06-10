@@ -229,6 +229,7 @@ def get_all_tool_groups() -> list[dict]:
         'description': SKILL_TOOL_GROUP.description,
         'methods': _SKILL_METHODS,
         'can_disable': False,
+        'active': True,
     })
     return result
 
