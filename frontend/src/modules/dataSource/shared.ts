@@ -1,7 +1,7 @@
 import type { TFunction } from "i18next";
 
 export type SourceType = "local" | "s3" | "feishu" | "confluence" | "notion";
-export type SourceStatus = "active" | "expired" | "error" | "paused";
+export type SourceStatus = "active" | "expired" | "error" | "paused" | "deleted";
 export type ConnectionState = "connected" | "expired" | "error" | "pending";
 export type SyncMode = "manual" | "scheduled";
 export type ConflictPolicy = "overwrite" | "skip" | "versioned";
@@ -238,6 +238,9 @@ export function normalizeDataSourceStatus(
   status?: string,
   watchEnabled?: boolean,
 ): SourceStatus {
+  if (hasStatusToken(status, ["delete", "deleted", "deleting", "removed"])) {
+    return "deleted";
+  }
   if (
     hasStatusToken(status, [
       "error",
@@ -439,6 +442,9 @@ export function getSourceTypeDescription(type: SourceType, t: TFunction) {
 }
 
 export function getStatusMeta(status: SourceStatus, t: TFunction) {
+  if (status === "deleted") {
+    return { color: "default", text: t("common.delete") };
+  }
   if (status === "active") {
     return { color: "success", text: t("admin.dataSourceStatusActive") };
   }
@@ -535,6 +541,29 @@ export function formatBytes(bytes?: number) {
   }
 
   return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+export function resolveStorageUsed(
+  summary?: Record<string, any>,
+  fallback?: string,
+) {
+  const bytes =
+    summary?.storage_bytes ??
+    summary?.storageBytes ??
+    summary?.storage_used_bytes ??
+    summary?.storageUsedBytes;
+
+  if (typeof bytes === "number") {
+    return formatBytes(bytes);
+  }
+
+  const parsedBytes =
+    typeof bytes === "string" && bytes.trim() ? Number(bytes) : Number.NaN;
+  if (Number.isFinite(parsedBytes)) {
+    return formatBytes(parsedBytes);
+  }
+
+  return fallback || "0 B";
 }
 
 // Source/sync state helpers below.

@@ -32,6 +32,7 @@ wget-log
 .claude
 .cursor
 .codex
+.worktrees/
 .codex-gocache/
 .codex-gomodcache/
 .reasonix
@@ -40,6 +41,7 @@ wget-log
 lazyllm_chroma/
 docs/en/assets
 docs/zh/assets
+docs/superpowers/
 
 # Prerequisites
 *.d
@@ -81,6 +83,7 @@ lazyllm_cpp.egg-info/
 !build_document.py
 
 .venv/
+.venv-test/
 data/
 volumes/
 .conda

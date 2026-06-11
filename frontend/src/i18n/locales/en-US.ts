@@ -476,6 +476,33 @@ const enUS = {
     newChat: "New Chat",
   },
 
+  datasetManagement: {
+    fields: {
+      caseId: "Case ID",
+      question: "Question",
+      questionType: "Question Type",
+      groundTruth: "Ground Truth",
+      keyPoints: "Key Points",
+      referenceContext: "Reference Context",
+      referenceDoc: "Reference Document",
+      referenceDocIds: "Reference Document IDs",
+      referenceChunkIds: "Reference Chunk IDs",
+      generateReason: "Generation Reason",
+      isDeleted: "Deleted",
+      source: "Source",
+      updatedAt: "Updated At",
+    },
+    import: {
+      rowNumber: "Row",
+      validationResult: "Validation",
+      passed: "Passed",
+    },
+    columnSettings: {
+      selectColumns: "Select Columns",
+      restoreDefault: "Restore Default",
+    },
+  },
+
   // Profile
   profile: {
     title: "Profile",
@@ -538,6 +565,7 @@ const enUS = {
     promptSuggestionPolishDesc: "Trim redundancy and improve readability",
     promptSuggestionPolishTemplate:
       "Please polish the following message by removing redundant wording and improving readability and accuracy:\n\n{{prompt}}",
+    promptPolishing: "Optimizing...",
     upload: "Upload file",
     modelProviderChecking: "Checking model configuration",
     modelProviderCheckingDesc: "Q&A will be available once the check finishes.",
@@ -623,6 +651,8 @@ const enUS = {
     customTemplate: "Custom Phrases",
     presetTemplate: "Preset Phrases",
     newTemplate: "New Phrase",
+    searchPromptPlaceholder: "Search phrase title or content",
+    noPromptMatched: "No matching phrases",
     use: "Use",
     preset: "Preset",
     presetPrompt1Name: "General Q&A Assistant",
@@ -1878,6 +1908,9 @@ const enUS = {
     memoryToolName: "Tool Name",
     memoryDescription: "Description",
     memoryTypicalUsage: "Typical Usage",
+    memoryToolStatus: "Status",
+    memoryToolEnableSuccess: "Tool enabled",
+    memoryToolDisableSuccess: "Tool disabled",
     memoryTitle: "Title",
     memoryContent: "Content",
     memoryMarkdown: "Content",
@@ -2146,7 +2179,7 @@ const enUS = {
     autoInteractionStatus: "Automatic processing is running. The system will proceed through the workflow and show process messages above.",
     retrying: "Retrying...",
     continuing: "Continuing...",
-    checkpointInputPlaceholder: "You can add more instructions, or click the button above to continue.",
+    checkpointInputPlaceholder: "Type \"{{command}}\" or add instructions for this checkpoint.",
     inputPlaceholder: "Continue with an instruction, for example: expand dataset samples first, then enter evaluation.",
     inputAria: "Continue entering self-evolution instructions",
     sendingMessage: "Sending message",

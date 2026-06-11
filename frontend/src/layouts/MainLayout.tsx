@@ -165,7 +165,7 @@ export default function MainLayout() {
       label: t("layout.memoryManagement"),
       icon: <AppstoreOutlined />,
     },
-    ...(isAdminUser && developerActive && !hideEvo
+    ...(!hideEvo
       ? [
           {
             key: "/self-evolution",
@@ -180,6 +180,7 @@ export default function MainLayout() {
       .VITE_APP_LOGO || "";
   const needsRestoreButtonSafeArea =
     pathname.startsWith("/model-providers") ||
+    pathname.startsWith("/lib/knowledge/detail") ||
     pathname.startsWith("/memory-management") ||
     pathname.startsWith("/self-evolution");
   const contentClassName = [
@@ -250,10 +251,10 @@ export default function MainLayout() {
   }, [developerActive, isAdminUser]);
 
   useEffect(() => {
-    if (pathname.startsWith("/self-evolution") && (hideEvo || !isAdminUser || !developerActive)) {
+    if (pathname.startsWith("/self-evolution") && hideEvo) {
       navigate("/agent/chat", { replace: true });
     }
-  }, [pathname, isAdminUser, developerActive, navigate, hideEvo]);
+  }, [pathname, navigate, hideEvo]);
 
   useEffect(() => {
     if (!pathname.startsWith("/agent/chat")) {
