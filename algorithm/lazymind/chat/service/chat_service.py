@@ -61,9 +61,15 @@ def _build_mcp_tools(mcp_config: List[Dict[str, Any]]) -> list:
     """Build MCP tool list from mcp_config. Skip individual servers on failure with a warning."""
     tools = []
     for server in mcp_config:
+        url = server.get('url')
+        if not url:
+            LOG.warning(
+                f"[MCP] skipped server {server.get('name')}: missing 'url' field"
+            )
+            continue
         try:
             client = MCPClient(
-                command_or_url=server['url'],
+                command_or_url=url,
                 headers=server.get('headers'),
                 timeout=server.get('timeout', 5),
                 transport=server.get('transport', 'auto'),
